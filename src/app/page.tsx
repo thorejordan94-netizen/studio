@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useTransition } from 'react';
+import { useState, useRef } from 'react';
 import type { ElementRef } from 'react';
-import { getGroupedMarkers } from './actions';
+import { groupMarkersHybrid } from '@/lib/client-marker-grouping';
 import { ContentArea, type ContentAreaHandle } from '@/components/content-area';
 import { MarkerOverlay } from '@/components/marker-overlay';
 
@@ -22,39 +22,39 @@ export type GroupedMarkers = {
 export default function Home() {
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [groupedMarkers, setGroupedMarkers] = useState<GroupedMarkers[]>([]);
-  const [isPending, startTransition] = useTransition();
+  const [isGrouping, setIsGrouping] = useState(false);
   const contentAreaRef = useRef<ContentAreaHandle>(null);
 
   const handleMarkerAdd = ({ text, elementId }: { text: string; elementId: string }) => {
-    startTransition(async () => {
-      const newMarker: Marker = {
-        id: Date.now().toString(),
-        text,
-        // In a real extension, this would be the page's actual URL
-        url: 'webmarker.app/sample-page',
-        elementId,
-      };
+    setIsGrouping(true);
+    
+    const newMarker: Marker = {
+      id: Date.now().toString(),
+      text,
+      // In a real extension, this would be the page's actual URL
+      url: 'webmarker.app/sample-page',
+      elementId,
+    };
 
-      const updatedMarkers = [...markers, newMarker];
-      setMarkers(updatedMarkers);
+    const updatedMarkers = [...markers, newMarker];
+    setMarkers(updatedMarkers);
 
-      // We only send the necessary data to the AI flow
-      const markersForAI = updatedMarkers.map(({ url, text }) => ({ url, text }));
-      const groupsFromAI = await getGroupedMarkers(markersForAI);
+    // Use client-side grouping
+    const markersForGrouping = updatedMarkers.map(({ url, text }) => ({ url, text }));
+    const groupsFromGrouping = groupMarkersHybrid(markersForGrouping);
 
-      // The AI returns groups with markers that only have `url` and `text`.
-      // We need to enrich them with our client-side `id` and `elementId` for navigation.
-      const enrichedGroups = groupsFromAI.map(group => {
-        const enrichedMarkers = group.markers
-          .map(aiMarker => 
-            updatedMarkers.find(m => m.text === aiMarker.text && m.url === aiMarker.url)
-          )
-          .filter((marker): marker is Marker => !!marker); // Type guard to filter out undefined
-        return { ...group, markers: enrichedMarkers };
-      });
-      
-      setGroupedMarkers(enrichedGroups);
+    // Enrich groups with client-side `id` and `elementId` for navigation
+    const enrichedGroups = groupsFromGrouping.map(group => {
+      const enrichedMarkers = group.markers
+        .map(groupMarker => 
+          updatedMarkers.find(m => m.text === groupMarker.text && m.url === groupMarker.url)
+        )
+        .filter((marker): marker is Marker => !!marker); // Type guard to filter out undefined
+      return { ...group, markers: enrichedMarkers };
     });
+    
+    setGroupedMarkers(enrichedGroups);
+    setIsGrouping(false);
   };
 
   const handleMarkerClick = (elementId: string) => {
@@ -69,7 +69,7 @@ export default function Home() {
       <MarkerOverlay 
         groupedMarkers={groupedMarkers} 
         onMarkerClick={handleMarkerClick} 
-        isLoading={isPending}
+        isLoading={isGrouping}
         totalMarkers={markers.length}
       />
     </div>
